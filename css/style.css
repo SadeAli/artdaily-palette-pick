@@ -464,10 +464,18 @@ a { color: inherit; }
 
 .btn-lock { margin-left: auto; }
 
+/* Wider gutters: a one-cell overshoot in a 12-wide grid is the drill's
+   most common non-colour error. The chips stay 1fr wide so the grid can
+   never overflow its column count on a narrow sheet.
+   The gap is declared HERE (and per breakpoint below) rather than in a
+   trailing override — an override at the end of the file has the same
+   specificity as the media-query rules and comes after them, so it won
+   at every width and silently widened the gutters the breakpoints below
+   were sized around. */
 .chips {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
-  gap: 5px;
+  gap: 8px;
 }
 .chip {
   width: 100%;
@@ -493,17 +501,30 @@ a { color: inherit; }
 .chip.rv-true[aria-pressed="true"] { opacity: 1; } /* a correct pick shows full strength */
 
 /* Fewer columns as the sheet narrows, so every chip stays ≥ 44px — the
-   touch-target floor. Breakpoints are where the next column count would
-   drop below it, given the sheet's own padding (90px of chrome down to
-   480px, 58px below it, where the shared stylesheet tightens up). */
-@media (max-width: 672px) {
+   touch-target floor, and the whole reason a finger can play this at all.
+   A chip's edge is (C − gap × (cols − 1)) / cols, where C is the drill's
+   own content box: the shared sheet spends 88px of chrome on it above
+   480px (.stage 20 + .term-body 24, per side) and 56px at or below, so
+   C = V − 88 / V − 56. Each breakpoint below is the width where the next
+   column count would put that edge under 44 — including the ugly step at
+   480px, where C DROPS by 32px as the chrome tightens, which is why 8
+   columns cannot be carried down to 480 itself.
+     12 cols, gap 8 → needs C ≥ 616 → V ≥ 704
+      8 cols, gap 8 → needs C ≥ 408 → V ≥ 496
+      6 cols, gap 6 → needs C ≥ 294 → V ≥ 350
+      5 cols, gap 6 → needs C ≥ 244 → V ≥ 300
+      4 cols, gap 6 → needs C ≥ 194 → V ≥ 250  */
+@media (max-width: 703px) {
   .chips { grid-template-columns: repeat(8, 1fr); }
 }
-@media (max-width: 444px) {
-  .chips { grid-template-columns: repeat(6, 1fr); gap: 4px; }
+@media (max-width: 495px) {
+  .chips { grid-template-columns: repeat(6, 1fr); gap: 6px; }
 }
-@media (max-width: 341px) {
-  .chips { grid-template-columns: repeat(5, 1fr); gap: 4px; }
+@media (max-width: 359px) {
+  .chips { grid-template-columns: repeat(5, 1fr); gap: 6px; }
+}
+@media (max-width: 307px) {
+  .chips { grid-template-columns: repeat(4, 1fr); gap: 6px; }
 }
 
 /* narrow screens: pin the scene while the chip grid scrolls beneath it */
@@ -611,7 +632,5 @@ button, .btn {
   color: color-mix(in srgb, var(--muted) 55%, var(--ink));
 }
 
-/* Wider gutters: a one-cell overshoot in a 12-wide grid is the drill's
-   most common non-colour error. The chips stay 1fr wide so the grid can
-   never overflow its column count on a narrow sheet. */
-.chips { gap: 8px; }
+/* (the chip grid's gutters and column breakpoints live with the .chips
+   rule above, so the media queries are not overridden from down here) */

@@ -732,6 +732,14 @@
   }
 
   function newRound() {
+    /* Scene 3's reveal is on screen and all three scenes are scored: the
+       round is FINISHED, it just has not been banked yet — the player has
+       to press the primary button once more for that. Pressing "new
+       round" there instead used to throw the whole round away, silently,
+       with the score sitting right in front of them. Flush it first.
+       finishRound() flips state to 'done', which this guard tests, so it
+       can never double-report (the same guard the sibling drills keep). */
+    if (state === 'reveal' && sceneScores.length >= SCENES_PER_ROUND) finishRound();
     round += 1;
     sceneIdx = 0;
     sceneScores = [];

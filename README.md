@@ -34,13 +34,24 @@ silently docked 28%.
 
 ## Input fairness
 
-Scores are only ever compared against your own history, so the drill
-eases its tolerances for the hardware in your hand and says which one it
-eased for (the "scoring for…" chip in the HUD). A pen keeps the strict
-reference; a mouse or trackpad, which pivots at the wrist and cannot
-creep, gets roughly double the room; a finger sits between. Start and
-grab zones move the other way — a screenless tablet needs the *biggest*
-targets, because the hand is out of sight. Relative tolerances carry an
-absolute pixel floor so a phone is never held to a stricter standard
-than a desktop for the same drill.
+Nothing in this drill is a stroke, so nothing in it is eased per device.
+Reading a colour is the same judgement from a pen, a trackpad or a thumb,
+and widening the tolerance for a phone would just hand it free points for
+the one thing the drill is actually testing. The HUD's "scoring for…"
+chip is the shared SDK reporting which pointer it detected; here it
+changes no number.
+
+What hardware *can* decide is whether you are able to enter the answer
+you meant, and that is what is guaranteed instead:
+
+* every chip stays at or above the 44px touch floor — the sheet steps
+  12 → 8 → 6 → 5 → 4 columns at 704 / 496 / 360 / 308px, each breakpoint
+  being exactly where the next column count would drop under 44 given the
+  page chrome (88px of it above 480px, 56px below);
+* a miss is counted in **grid cells**, not raw ΔE: `ZERO_CELLS = 2.0`
+  against the mean ΔE between neighbouring chips, so an aiming slip of
+  one cell costs about half that role's points rather than all of them.
+
+A trackpad overshoot in a 12-wide grid is the drill's most common
+non-colour error, which is why the cell yardstick exists at all.
 
