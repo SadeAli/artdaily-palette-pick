@@ -468,9 +468,22 @@
   }
 
   /* ---- painting ---- */
+  /* The canvas is a role="img", so its label is the ONLY thing said about
+     it — and "Palette Pick drill area" said nothing true: not which scene
+     it is, not that it is a painting, not that the answer strip has
+     appeared over it. (It also carried tabindex="0": a focus stop with no
+     keyboard behaviour behind it, sitting between the HUD and the picker.
+     Removed — there is nothing there to operate.) */
+  function labelCanvas() {
+    canvas.setAttribute('aria-label', 'scene ' + (sceneIdx + 1) + ' of ' + SCENES_PER_ROUND +
+      ' — a painted landscape; its colours are what you read' +
+      (state === 'pick' ? '' : ' · the true palette is now taped across the bottom of it'));
+  }
+
   function draw() {
     var c = inks();
     ctx.clearRect(0, 0, W, H);
+    labelCanvas();
     if (!scene) return;
     var i, j, op;
     for (i = 0; i < scene.ops.length; i++) {
@@ -566,7 +579,9 @@
       b.className = 'chip';
       b.style.background = rgbCss(scene.chips[i].rgb);
       b.setAttribute('aria-pressed', 'false');
-      b.setAttribute('aria-label', 'chip ' + rgbHex(scene.chips[i].rgb) + ' — tap to pick, retap to clear');
+      /* "tap" is wrong for the half of the room on a keyboard, and the
+         pressed state already says whether it is picked */
+      b.setAttribute('aria-label', 'chip ' + rgbHex(scene.chips[i].rgb));
       b.dataset.idx = String(i);
       b.addEventListener('click', onChip);
       chipsEl.appendChild(b);
@@ -583,7 +598,7 @@
         filled++;
         el.classList.add('filled');
         el.style.background = rgbCss(p.rgb);
-        el.setAttribute('aria-label', 'pick ' + (i + 1) + ', ' + SLOT_NAMES[i] + ': ' + rgbHex(p.rgb) + ' — tap to clear');
+        el.setAttribute('aria-label', 'pick ' + (i + 1) + ', ' + SLOT_NAMES[i] + ': ' + rgbHex(p.rgb) + ' — press to clear');
       } else {
         el.classList.remove('filled');
         el.style.background = '';
@@ -639,6 +654,12 @@
 
   /* ---- reveal ---- */
   function renderReveal(res) {
+    /* Unhide FIRST. This panel is the drill's whole payload and it is a
+       live region — but it was filled while still `hidden`, i.e. inside a
+       subtree the accessibility tree does not carry, and un-hiding it
+       afterwards is not a content change. Every row of it announced
+       nothing at all. Show, then fill. */
+    revealEl.hidden = false;
     revealEl.innerHTML = '';
     var i, cl, m, row, bar, lab, sw, de, note;
     var title = document.createElement('p');
@@ -709,7 +730,6 @@
       note.textContent = 'accent spotted — +' + res.bonus;
       revealEl.appendChild(note);
     }
-    revealEl.hidden = false;
   }
 
   /* ---- flow ---- */
@@ -798,12 +818,17 @@
 
   var toastTimer = null;
   function showToast(msg, celebrate) {
+    /* Unhide BEFORE filling. A live region that is mutated while it is
+       still `hidden` is mutated inside a subtree the accessibility tree
+       does not carry, and un-hiding it afterwards is not itself a content
+       change — so the round score announced to nobody. Show it first,
+       then write into it, and the announcement actually happens. */
+    toast.hidden = false;
     toast.innerHTML = '';
     var s = document.createElement('span');
     s.className = celebrate ? 'toast-accent' : '';
     s.textContent = msg;
     toast.appendChild(s);
-    toast.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { toast.hidden = true; }, 2200);
   }
