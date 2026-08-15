@@ -801,7 +801,19 @@
   }
 
   /* ---- chrome wiring ---- */
-  btnLock.addEventListener('click', onLock);
+  /* The one primary button changes job in place (lock it in → next scene
+     →), so the second click of an accidental double-click fires the NEW
+     action: it starts the next scene and takes the ringed true chips, the
+     ΔE rows and the palette strip with it before they can be read. Ignore
+     a repeat that arrives inside the guard window. */
+  var ACTION_GUARD_MS = 250;
+  var actionAt = 0;
+  btnLock.addEventListener('click', function () {
+    var now = Date.now();
+    if (now - actionAt < ACTION_GUARD_MS) return;
+    actionAt = now;
+    onLock();
+  });
   btnRound.addEventListener('click', newRound);
 
   var btnHow = document.getElementById('btnHow');
