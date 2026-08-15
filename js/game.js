@@ -20,10 +20,14 @@
      pure colour + scoring math (no DOM, no canvas — unit-testable)
      ============================================================ */
 
-  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+  /* Written so NaN falls out at 0 rather than propagating: a broken
+     number must never be able to buy score downstream of here. */
+  function clamp01(v) { return v > 0 ? (v > 1 ? 1 : v) : 0; }
 
   /* h degrees (any), s/l 0–100 → {r,g,b} 0–255 */
   function hslToRgb(h, s, l) {
+    h = Number(h);
+    if (!isFinite(h)) h = 0; /* NaN/±Infinity % 360 is NaN, which would poison the channels */
     h = ((h % 360) + 360) % 360;
     s = clamp01(s / 100);
     l = clamp01(l / 100);
@@ -42,7 +46,12 @@
 
   /* sRGB 0–255 → linear → XYZ (D65) → CIE Lab */
   function rgbToLab(rgb) {
-    function lin(c) { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+    function lin(c) {
+      c = Number(c);
+      if (!isFinite(c)) c = 0;
+      c = (c < 0 ? 0 : c > 255 ? 255 : c) / 255;
+      return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    }
     var r = lin(rgb.r), g = lin(rgb.g), b = lin(rgb.b);
     var X = (0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047;
     var Y = 0.2126729 * r + 0.7151522 * g + 0.0721750 * b;
@@ -71,21 +80,29 @@
 
   function perMatchScore(dE) { return 100 * clamp01(1 - dE / 38); }
 
-  /* True clusters in weight order (dominant → secondary → accent)
-     greedily take the nearest unused player pick. */
+  /* Assign the 3 picks to [dominant, secondary, accent] by brute-forcing
+     all 6 permutations and keeping the best weighted total (accent bonus
+     included) — greedy nearest-first could under-credit a good trio when
+     one pick sat between two clusters. */
+  var PERMS3 = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+  var NO_PICK_DE = 200; /* a missing pick scores 0 but stays a printable number */
   function matchPicks(trueLabs, pickLabs) {
-    var used = [], out = [], i, j, bi, bd, d;
-    for (i = 0; i < trueLabs.length; i++) {
-      bi = -1; bd = Infinity;
-      for (j = 0; j < pickLabs.length; j++) {
-        if (used[j]) continue;
-        d = deltaE(trueLabs[i], pickLabs[j]);
-        if (d < bd) { bd = d; bi = j; }
+    var best = null, bestTotal = -Infinity, p, i, perm, m, total, d;
+    for (p = 0; p < PERMS3.length; p++) {
+      perm = PERMS3[p];
+      m = [];
+      total = 0;
+      for (i = 0; i < trueLabs.length; i++) {
+        /* onLock only ever hands us three picks; the guard keeps the pure
+           function total for callers (and tests) that do not. */
+        d = pickLabs[perm[i]] ? deltaE(trueLabs[i], pickLabs[perm[i]]) : NO_PICK_DE;
+        m.push({ pick: perm[i], dE: d });
+        total += (MATCH_WEIGHTS[i] || 0) * perMatchScore(d);
       }
-      used[bi] = true;
-      out.push({ pick: bi, dE: bd });
+      if (m.length > 2 && m[2].dE < 20) total += 6; /* same bonus scoreScene grants */
+      if (total > bestTotal) { bestTotal = total; best = m; }
     }
-    return out;
+    return best;
   }
 
   /* trueRgbs = [dominant, secondary, accent] cluster centres,
@@ -151,8 +168,9 @@
   }
 
   function makePalette(d) {
-    var pal = null, attempt, h0, flip, sat, secOff, accOff, wd, ws, wa, minorTotal, total, twoMinors, m1;
-    for (attempt = 0; attempt < 24; attempt++) {
+    var pal = null, best = null, bestSep = -1, sep;
+    var attempt, h0, flip, sat, secOff, accOff, wd, ws, wa, minorTotal, total, twoMinors, m1;
+    for (attempt = 0; attempt < 120; attempt++) {
       h0 = rand(0, 360);
       flip = Math.random() < 0.5 ? -1 : 1;
       sat = SAT_BASE[d] + rand(-5, 5);
@@ -175,12 +193,18 @@
         pal.push(makeCluster('minor', h0 + flip * secOff + rand(-20, 20), sat * 0.55, rand(68, 80), (minorTotal * 0.4) / total));
       }
       /* the three scored clusters must stay tellable-apart (also keeps
-         a perfect pick clear of the samey penalty, so 100 is reachable) */
-      if (deltaE(pal[0].lab, pal[1].lab) >= 24 &&
-          deltaE(pal[0].lab, pal[2].lab) >= 24 &&
-          deltaE(pal[1].lab, pal[2].lab) >= 24) break;
+         a perfect pick clear of the samey penalty, so 100 is reachable).
+         Track the widest-separated attempt so a failed run still returns
+         the best palette seen, never just the last roll of the dice. */
+      sep = Math.min(
+        deltaE(pal[0].lab, pal[1].lab),
+        deltaE(pal[0].lab, pal[2].lab),
+        deltaE(pal[1].lab, pal[2].lab)
+      );
+      if (sep > bestSep) { bestSep = sep; best = pal; }
+      if (sep >= 24) break;
     }
-    return pal;
+    return best;
   }
 
   function jitterCss(cl, jit) {
@@ -298,6 +322,24 @@
       }
       chips[bi] = { rgb: cl.rgb, lab: cl.lab, planted: true };
     }
+    /* decoys: a planted answer can sit visibly off its row's tone, so a
+       grid-hunter could spot it by irregularity alone. Give a handful of
+       random non-planted cells the same kind of displacement — now an
+       off-tone chip proves nothing; only reading the scene does. */
+    var decoys = 6, guard = 0, di, dr;
+    while (decoys > 0 && guard < 200) {
+      guard++;
+      di = Math.floor(rand(0, chips.length));
+      if (di >= chips.length || chips[di].planted) continue;
+      dr = Math.floor(di / HUE_COLS);
+      rgb = hslToRgb(
+        hueOff + (di % HUE_COLS) * (360 / HUE_COLS) + rand(-8, 8),
+        TONES[dr].s * TONE_SAT_SCALE[d] + rand(-16, 16),
+        TONES[dr].l + rand(-13, 13)
+      );
+      chips[di] = { rgb: rgb, lab: rgbToLab(rgb), planted: false };
+      decoys--;
+    }
     return chips;
   }
 
@@ -316,6 +358,7 @@
   var chipsEl = document.getElementById('chips');
   var revealEl = document.getElementById('reveal');
   var btnLock = document.getElementById('btnLock');
+  var btnRound = document.getElementById('btnRound');
 
   ArtDaily.init({ slug: SLUG });
 
@@ -345,6 +388,11 @@
   var round = 0, sceneIdx = 0, sceneScores = [], scene = null, state = 'pick';
   var picks = [null, null, null];
   var slotEls = [], chipEls = [];
+
+  function baseHint() {
+    return 'scene ' + (sceneIdx + 1) + ' of ' + SCENES_PER_ROUND +
+      ' — tap the dominant, secondary and accent chips, any order.';
+  }
 
   function pickIndexOfChip(chipIdx) {
     for (var i = 0; i < picks.length; i++) {
@@ -384,7 +432,9 @@
     if (state !== 'pick') drawPaletteStrip(c);
   }
 
-  /* the true weighted palette, taped over the scene after locking in */
+  /* the true weighted palette, taped over the scene after locking in;
+     role initials (D / S / A / m) let the strip map onto the reveal rows */
+  var ROLE_LETTER = { dominant: 'D', secondary: 'S', accent: 'A', minor: 'm' };
   function drawPaletteStrip(c) {
     var pad = 10, h = 24;
     var x = pad, y = H - h - pad, wAvail = W - pad * 2;
@@ -395,8 +445,28 @@
     ctx.strokeRect(x - 4, y - 4, wAvail + 8, h + 8);
     for (var i = 0; i < scene.pal.length; i++) {
       var w = scene.pal[i].weight * wAvail;
+      var segW = Math.max(1, w - 2);
       ctx.fillStyle = rgbCss(scene.pal[i].rgb);
-      ctx.fillRect(x, y, Math.max(1, w - 2), h);
+      ctx.fillRect(x, y, segW, h);
+      if (segW >= 16) {
+        /* Ink by segment lightness — but L* 52 is exactly where the two
+           inks tie, and they only reach 4.0:1 there, under AA. So the
+           glyph is also haloed in the opposite ink: the letter is then
+           read against that halo (~14:1) rather than against whatever
+           colour the palette happened to roll, in either theme. */
+        var lightSeg = scene.pal[i].lab.L > 52;
+        var letter = ROLE_LETTER[scene.pal[i].role] || 'm';
+        var lx = x + segW / 2, ly = y + h / 2 + 1;
+        ctx.font = '700 12px ui-monospace, Menlo, Consolas, monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.lineWidth = 3;
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = lightSeg ? '#FDFAF1' : '#221D16';
+        ctx.strokeText(letter, lx, ly);
+        ctx.fillStyle = lightSeg ? '#221D16' : '#FDFAF1';
+        ctx.fillText(letter, lx, ly);
+      }
       x += w;
     }
   }
@@ -426,7 +496,7 @@
       b.className = 'chip';
       b.style.background = rgbCss(scene.chips[i].rgb);
       b.setAttribute('aria-pressed', 'false');
-      b.setAttribute('aria-label', 'chip ' + rgbHex(scene.chips[i].rgb));
+      b.setAttribute('aria-label', 'chip ' + rgbHex(scene.chips[i].rgb) + ' — tap to pick, retap to clear');
       b.dataset.idx = String(i);
       b.addEventListener('click', onChip);
       chipsEl.appendChild(b);
@@ -460,9 +530,15 @@
   function onChip(ev) {
     if (state !== 'pick') return;
     var idx = parseInt(ev.currentTarget.dataset.idx, 10);
-    if (pickIndexOfChip(idx) !== -1) return;
+    var pi = pickIndexOfChip(idx);
+    if (pi !== -1) { /* retap a picked chip = unpick it */
+      picks[pi] = null;
+      hint.textContent = baseHint();
+      syncPicker();
+      return;
+    }
     var s = firstEmptySlot();
-    if (s === -1) { showToast('all 3 slots full — tap one to clear it'); return; }
+    if (s === -1) { showToast('all 3 slots full — retap a chip or a slot to clear'); return; }
     picks[s] = { chip: idx, rgb: scene.chips[idx].rgb };
     syncPicker();
   }
@@ -472,7 +548,7 @@
     var i = parseInt(ev.currentTarget.dataset.idx, 10);
     if (!picks[i]) return;
     picks[i] = null;
-    hint.textContent = 'scene ' + (sceneIdx + 1) + ' of ' + SCENES_PER_ROUND + ' — tap the 3 chips that carry it.';
+    hint.textContent = baseHint();
     syncPicker();
   }
 
@@ -484,25 +560,36 @@
     title.className = 'reveal-title';
     title.textContent = 'scene ' + (sceneIdx + 1) + ': ' + Math.round(res.score) + '/100';
     revealEl.appendChild(title);
+    var legend = document.createElement('p');
+    legend.className = 'rv-note';
+    legend.textContent = 'each bar: true colour, your pick butted on its right · ringed chips above were the answers';
+    revealEl.appendChild(legend);
+    var pair;
     for (i = 0; i < 3; i++) {
       cl = scene.pal[i];
       m = res.matches[i];
       row = document.createElement('div');
       row.className = 'rv-row';
+      /* true colour and your pick butted edge to edge — subtle misses
+         only read when the two fields actually touch */
+      pair = document.createElement('span');
+      pair.className = 'rv-pair';
       bar = document.createElement('span');
       bar.className = 'rv-bar';
       bar.style.background = rgbCss(cl.rgb);
       bar.style.width = Math.max(24, Math.round(cl.weight * 260)) + 'px';
-      row.appendChild(bar);
-      lab = document.createElement('span');
-      lab.className = 'rv-label';
-      lab.textContent = cl.role + ' · ' + Math.round(cl.weight * 100) + '%';
-      row.appendChild(lab);
+      bar.title = 'true ' + cl.role;
+      pair.appendChild(bar);
       sw = document.createElement('span');
       sw.className = 'rv-swatch';
       sw.style.background = rgbCss(picks[m.pick].rgb);
       sw.title = 'your pick';
-      row.appendChild(sw);
+      pair.appendChild(sw);
+      row.appendChild(pair);
+      lab = document.createElement('span');
+      lab.className = 'rv-label';
+      lab.textContent = cl.role + ' · ' + Math.round(cl.weight * 100) + '%';
+      row.appendChild(lab);
       de = document.createElement('span');
       de.className = 'rv-de';
       de.textContent = 'ΔE ' + Math.round(m.dE) + ' → ' + Math.round(m.per) + '/100';
@@ -549,8 +636,13 @@
     renderChips();
     syncPicker();
     btnLock.textContent = 'lock it in';
-    hint.textContent = 'scene ' + (sceneIdx + 1) + ' of ' + SCENES_PER_ROUND + ' — tap the 3 chips that carry it.';
+    hint.textContent = baseHint();
     draw();
+  }
+
+  /* mid-round the button throws the round away — say so before it does */
+  function setRoundBtnLabel(inProgress) {
+    btnRound.innerHTML = (inProgress ? 'restart round ' : 'new round ') + '<span aria-hidden="true">↻</span>';
   }
 
   function newRound() {
@@ -559,6 +651,7 @@
     sceneScores = [];
     hudRound.textContent = String(round);
     hudScore.textContent = '–';
+    setRoundBtnLabel(true);
     startScene();
   }
 
@@ -571,7 +664,12 @@
       );
       sceneScores.push(res.score);
       state = 'reveal';
-      chipsEl.hidden = true;
+      /* keep the grid on screen and ring the three true chips — spatial
+         "you were two cells off" feedback that carries to the next scene */
+      for (var ci = 0; ci < chipEls.length; ci++) {
+        if (scene.chips[ci].planted) chipEls[ci].classList.add('rv-true');
+        chipEls[ci].disabled = true;
+      }
       renderReveal(res);
       draw();
       hint.textContent = 'dominant ΔE ' + Math.round(res.matches[0].dE) +
@@ -599,6 +697,7 @@
     hint.textContent = 'round done — press “new round” to go again.';
     btnLock.textContent = 'round done';
     btnLock.disabled = true;
+    setRoundBtnLabel(false);
     showToast((res.isNewBest ? 'new best! ' : 'score ') + res.score + ' / 100', res.isNewBest);
   }
 
@@ -616,7 +715,7 @@
 
   /* ---- chrome wiring ---- */
   btnLock.addEventListener('click', onLock);
-  document.getElementById('btnRound').addEventListener('click', newRound);
+  btnRound.addEventListener('click', newRound);
 
   var btnHow = document.getElementById('btnHow');
   var howTo = document.getElementById('howTo');
