@@ -20,3 +20,27 @@ pay), and cluster separation is enforced — 100 stays reachable.
 Run: any static server — `python3 -m http.server 8080` — zero build, zero deps.
 
 Part of [Art Daily](https://artdaily.sadeali.com/) · more at [sadeali.com](https://sadeali.com/).
+
+## What changed in the input-fairness pass
+
+A miss is now measured in CHIPS, not raw ΔE: the sheet steps ~ΔE 37 per
+column while the old score zeroed at 38, so tapping one square off a
+correctly-read colour scored 1 or 2 out of 100. One chip off now earns
+about 48 and two collapse. The three roles are named in plain English
+under the slots (biggest area / second colour / small loud one) instead
+of being asked for in trade terms and only decoded after the score, and
+three near-identical picks are refused with a sentence rather than
+silently docked 28%.
+
+## Input fairness
+
+Scores are only ever compared against your own history, so the drill
+eases its tolerances for the hardware in your hand and says which one it
+eased for (the "scoring for…" chip in the HUD). A pen keeps the strict
+reference; a mouse or trackpad, which pivots at the wrist and cannot
+creep, gets roughly double the room; a finger sits between. Start and
+grab zones move the other way — a screenless tablet needs the *biggest*
+targets, because the hand is out of sight. Relative tolerances carry an
+absolute pixel floor so a phone is never held to a stricter standard
+than a desktop for the same drill.
+

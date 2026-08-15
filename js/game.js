@@ -78,7 +78,58 @@
     return m;
   }
 
-  function perMatchScore(dE) { return 100 * clamp01(1 - dE / 38); }
+  /* THE GRID'S OWN RESOLUTION IS THE ONLY HONEST YARDSTICK. The chip
+     sheet steps 30° of hue per column, which on the saturated rows is
+     ΔE ~37 between neighbouring cells — and the old score zeroed at ΔE 38.
+     So the scoring window was exactly one cell wide: a player who READ THE
+     SCENE CORRECTLY and tapped one square off scored 1 or 2 out of 100 for
+     that role. That is an aiming slip priced as a colour mistake, and in a
+     12-wide grid on a trackpad it is the common case, not the exception.
+     Measure the miss in CELLS instead — dE divided by the mean distance
+     between neighbouring chips — so one cell off costs the same on a
+     saturated scene as on a muted one, and two cells off (a real misread)
+     still collapses. */
+  var ZERO_CELLS = 2.0;
+  var FALLBACK_STEP = 20; /* used only if a caller omits the grid step */
+
+  function cellsOff(dE, cellStep) {
+    var step = (typeof cellStep === 'number' && isFinite(cellStep) && cellStep > 1)
+      ? cellStep : FALLBACK_STEP;
+    var c = dE / step;
+    return isFinite(c) ? c : ZERO_CELLS;
+  }
+
+  function perMatchScore(dE, cellStep) {
+    return 100 * clamp01(1 - cellsOff(dE, cellStep) / ZERO_CELLS);
+  }
+
+  /* Mean ΔE between neighbouring cells: the finest distinction the sheet
+     can express, and therefore the unit a miss should be counted in. */
+  function gridCellStep(chips, cols) {
+    var rows = Math.floor(chips.length / cols), sum = 0, n = 0, r, c, i;
+    for (r = 0; r < rows; r++) {
+      for (c = 0; c < cols; c++) {
+        i = r * cols + c;
+        if (c + 1 < cols) { sum += deltaE(chips[i].lab, chips[i + 1].lab); n++; }
+        if (r + 1 < rows) { sum += deltaE(chips[i].lab, chips[i + cols].lab); n++; }
+      }
+    }
+    return n ? sum / n : FALLBACK_STEP;
+  }
+
+  /* The miss in plain words — and in the unit the player actually moves
+     in. The ΔE number still rides along on the reveal rows for anyone who
+     wants it, but the sentence a beginner acts on must not need one. */
+  function matchWord(dE, cellStep) {
+    if (!isFinite(dE)) return 'no pick';
+    var c = cellsOff(dE, cellStep);
+    if (c < 0.5) return 'spot on';
+    if (c < 1.4) return 'one chip off';
+    if (c < 2.4) return 'a couple of chips off';
+    return 'well off';
+  }
+
+  var SAMEY_DE = 14; /* below this the three picks are one colour, not a palette */
 
   /* Assign the 3 picks to [dominant, secondary, accent] by brute-forcing
      all 6 permutations and keeping the best weighted total (accent bonus
@@ -86,7 +137,7 @@
      one pick sat between two clusters. */
   var PERMS3 = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
   var NO_PICK_DE = 200; /* a missing pick scores 0 but stays a printable number */
-  function matchPicks(trueLabs, pickLabs) {
+  function matchPicks(trueLabs, pickLabs, cellStep) {
     var best = null, bestTotal = -Infinity, p, i, perm, m, total, d;
     for (p = 0; p < PERMS3.length; p++) {
       perm = PERMS3[p];
@@ -97,7 +148,7 @@
            function total for callers (and tests) that do not. */
         d = pickLabs[perm[i]] ? deltaE(trueLabs[i], pickLabs[perm[i]]) : NO_PICK_DE;
         m.push({ pick: perm[i], dE: d });
-        total += (MATCH_WEIGHTS[i] || 0) * perMatchScore(d);
+        total += (MATCH_WEIGHTS[i] || 0) * perMatchScore(d, cellStep);
       }
       if (m.length > 2 && m[2].dE < 20) total += 6; /* same bonus scoreScene grants */
       if (total > bestTotal) { bestTotal = total; best = m; }
@@ -106,20 +157,23 @@
   }
 
   /* trueRgbs = [dominant, secondary, accent] cluster centres,
-     pickRgbs = the player's 3 picks.
+     pickRgbs = the player's 3 picks, cellStep = this scene's grid
+     resolution (mean ΔE between neighbouring chips).
      → { score 0–100, matches[{pick,dE,per}], samey, bonus } */
-  function scoreScene(trueRgbs, pickRgbs) {
+  function scoreScene(trueRgbs, pickRgbs, cellStep) {
     var trueLabs = [], pickLabs = [], i;
     for (i = 0; i < trueRgbs.length; i++) trueLabs.push(rgbToLab(trueRgbs[i]));
     for (i = 0; i < pickRgbs.length; i++) pickLabs.push(rgbToLab(pickRgbs[i]));
-    var matches = matchPicks(trueLabs, pickLabs);
+    var matches = matchPicks(trueLabs, pickLabs, cellStep);
     var base = 0;
     for (i = 0; i < matches.length; i++) {
-      matches[i].per = perMatchScore(matches[i].dE);
+      matches[i].per = perMatchScore(matches[i].dE, cellStep);
       base += (MATCH_WEIGHTS[i] || 0) * matches[i].per;
     }
-    /* three near-identical picks hedge instead of reading the scene */
-    var samey = maxPairwiseDE(pickLabs) < 14;
+    /* three near-identical picks hedge instead of reading the scene.
+       The UI now blocks locking those in (with a sentence saying why),
+       so this is a floor for direct callers rather than a trap. */
+    var samey = maxPairwiseDE(pickLabs) < SAMEY_DE;
     if (samey) base *= 0.72;
     var bonus = (matches.length > 2 && matches[2].dE < 20) ? 6 : 0;
     var score = base + bonus;
@@ -295,7 +349,8 @@
       ops.push(dabOp(rand(0.05, 0.95), fy + rand(-0.04, 0.05), 0.012, 0.03, 0.012, 0.026, jitterCss(acc, jit)));
     }
 
-    return { pal: pal, ops: ops, chips: makeChips(pal, d) };
+    var chips = makeChips(pal, d);
+    return { pal: pal, ops: ops, chips: chips, cellStep: gridCellStep(chips, HUE_COLS) };
   }
 
   /* 48 chips: 12 hues × 4 tones, with the three true cluster centres
@@ -389,9 +444,15 @@
   var picks = [null, null, null];
   var slotEls = [], chipEls = [];
 
+  /* The three roles, named in words a beginner already owns. The trade
+     terms (dominant / secondary / accent) are what the reveal strip
+     teaches — they are not asked for before anything has shown them. */
+  var SLOT_NAMES = ['biggest area', 'second colour', 'small loud one'];
+
   function baseHint() {
     return 'scene ' + (sceneIdx + 1) + ' of ' + SCENES_PER_ROUND +
-      ' — tap the dominant, secondary and accent chips, any order.';
+      ' — tap 3 chips: the colour covering the biggest area, the second' +
+      ' one, and the small loud note. any order. retap to undo.';
   }
 
   function pickIndexOfChip(chipIdx) {
@@ -476,13 +537,22 @@
     slotsEl.innerHTML = '';
     slotEls = [];
     for (var i = 0; i < 3; i++) {
+      var cell = document.createElement('div');
+      cell.className = 'slot-cell';
       var b = document.createElement('button');
       b.type = 'button';
       b.className = 'slot';
       b.textContent = String(i + 1);
       b.dataset.idx = String(i);
       b.addEventListener('click', onSlot);
-      slotsEl.appendChild(b);
+      /* the role is named UNDER the square, on the first screen, instead
+         of only being decoded by the reveal after the score is banked */
+      var cap = document.createElement('span');
+      cap.className = 'slot-cap';
+      cap.textContent = SLOT_NAMES[i];
+      cell.appendChild(b);
+      cell.appendChild(cap);
+      slotsEl.appendChild(cell);
       slotEls.push(b);
     }
   }
@@ -513,18 +583,33 @@
         filled++;
         el.classList.add('filled');
         el.style.background = rgbCss(p.rgb);
-        el.setAttribute('aria-label', 'pick ' + (i + 1) + ': ' + rgbHex(p.rgb) + ' — tap to clear');
+        el.setAttribute('aria-label', 'pick ' + (i + 1) + ', ' + SLOT_NAMES[i] + ': ' + rgbHex(p.rgb) + ' — tap to clear');
       } else {
         el.classList.remove('filled');
         el.style.background = '';
-        el.setAttribute('aria-label', 'pick ' + (i + 1) + ' — empty');
+        el.setAttribute('aria-label', 'pick ' + (i + 1) + ', ' + SLOT_NAMES[i] + ' — empty');
       }
     }
     for (i = 0; i < chipEls.length; i++) {
       chipEls[i].setAttribute('aria-pressed', pickIndexOfChip(i) !== -1 ? 'true' : 'false');
     }
-    btnLock.disabled = filled < 3;
-    if (state === 'pick' && filled === 3) hint.textContent = 'happy with the trio? lock it in.';
+    if (filled < 3) {
+      btnLock.disabled = true;
+      return;
+    }
+    /* Three near-identical picks used to lock in fine and then get docked
+       28% in silence. Say it BEFORE the score instead — a beginner
+       hedging on three bits of sky is making a judgement error the drill
+       exists to correct, not a rule violation to be fined for. */
+    var samey = maxPairwiseDE([
+      rgbToLab(picks[0].rgb), rgbToLab(picks[1].rgb), rgbToLab(picks[2].rgb),
+    ]) < SAMEY_DE;
+    btnLock.disabled = samey;
+    if (state === 'pick') {
+      hint.textContent = samey
+        ? 'those three are nearly the same colour — a scene needs a big quiet area, a second colour, and one small loud note. swap one out.'
+        : 'happy with the trio? lock it in.';
+    }
   }
 
   function onChip(ev) {
@@ -562,7 +647,8 @@
     revealEl.appendChild(title);
     var legend = document.createElement('p');
     legend.className = 'rv-note';
-    legend.textContent = 'each bar: true colour, your pick butted on its right · ringed chips above were the answers';
+    legend.textContent = 'each bar: true colour, your pick butted on its right · ringed chips above were the answers' +
+      (sceneIdx === 0 ? ' · ΔE = how far apart the eye reads two colours — under 8 is a very close match' : '');
     revealEl.appendChild(legend);
     var pair;
     for (i = 0; i < 3; i++) {
@@ -588,11 +674,11 @@
       row.appendChild(pair);
       lab = document.createElement('span');
       lab.className = 'rv-label';
-      lab.textContent = cl.role + ' · ' + Math.round(cl.weight * 100) + '%';
+      lab.textContent = SLOT_NAMES[i] + ' (' + cl.role + ') · ' + Math.round(cl.weight * 100) + '%';
       row.appendChild(lab);
       de = document.createElement('span');
       de.className = 'rv-de';
-      de.textContent = 'ΔE ' + Math.round(m.dE) + ' → ' + Math.round(m.per) + '/100';
+      de.textContent = matchWord(m.dE, scene.cellStep) + ' — ' + Math.round(m.per) + '/100 · ΔE ' + Math.round(m.dE);
       row.appendChild(de);
       revealEl.appendChild(row);
     }
@@ -660,7 +746,8 @@
       if (firstEmptySlot() !== -1) return;
       var res = scoreScene(
         [scene.pal[0].rgb, scene.pal[1].rgb, scene.pal[2].rgb],
-        [picks[0].rgb, picks[1].rgb, picks[2].rgb]
+        [picks[0].rgb, picks[1].rgb, picks[2].rgb],
+        scene.cellStep
       );
       sceneScores.push(res.score);
       state = 'reveal';
@@ -672,9 +759,9 @@
       }
       renderReveal(res);
       draw();
-      hint.textContent = 'dominant ΔE ' + Math.round(res.matches[0].dE) +
-        ' · secondary ΔE ' + Math.round(res.matches[1].dE) +
-        ' · accent ΔE ' + Math.round(res.matches[2].dE);
+      hint.textContent = matchWord(res.matches[0].dE, scene.cellStep) + ' on the biggest area · ' +
+        matchWord(res.matches[1].dE, scene.cellStep) + ' on the second · ' +
+        matchWord(res.matches[2].dE, scene.cellStep) + ' on the small loud one.';
       btnLock.textContent = (sceneIdx < SCENES_PER_ROUND - 1) ? 'next scene →' : 'finish round';
       btnLock.disabled = false;
       return;

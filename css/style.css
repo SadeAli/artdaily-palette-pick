@@ -39,7 +39,7 @@
   --hand: 'Caveat', 'Segoe Print', 'Comic Sans MS', cursive;
   --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
 
-  --game-accent: var(--sky);
+  --game-accent: var(--sky); /* TODO: pick this game's accent */
 }
 
 :root[data-theme="dark"] {
@@ -383,6 +383,20 @@ a { color: inherit; }
   }
 }
 
+/* The SDK fills this when it knows the input hardware. Scores are eased
+   per device, so the drill says which device it eased for. */
+.hud-input { min-width: 0; border: 0; background: none; padding: 5px 2px; display: flex; align-items: flex-end; }
+.hud-input dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  max-width: 8.5rem;
+  line-height: 1.25;
+}
+
 /* ============================================================
    game-specific styles below this line
    ============================================================ */
@@ -528,3 +542,54 @@ a { color: inherit; }
 .rv-label { color: color-mix(in srgb, var(--muted) 55%, var(--ink)); min-width: 110px; }
 .rv-de { font-variant-numeric: tabular-nums; }
 .rv-note { margin: 6px 0 0; color: color-mix(in srgb, var(--muted) 55%, var(--ink)); }
+
+/* ============================================================
+   Tablet + phone gestures — shared hardening.
+   A slow, deliberate press is exactly the gesture that raises the
+   iOS copy/share callout over a drawing surface, and a quick second
+   tap on a control is exactly what zooms the sheet mid-round. Both
+   read to a beginner as "this page is broken", so both are shut off
+   here rather than left to the platform default.
+   ============================================================ */
+html, body { overscroll-behavior-y: contain; }
+
+.game-canvas {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+button, .btn {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;  /* a second quick tap must not zoom the sheet */
+}
+
+.btn { min-height: 44px; }     /* the phone tap-target floor */
+
+/* ---- role captions under the three slots ----
+   The words "dominant / secondary / accent" used to be asked for in the
+   hint and only decoded by the reveal, i.e. after the score. Name the
+   roles in plain English on the first screen instead. */
+.slots { align-items: flex-start; }
+.slot-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 4.6em;
+}
+.slot-cap {
+  font-size: 0.6rem;
+  font-weight: 800;
+  line-height: 1.15;
+  text-align: center;
+  letter-spacing: 0.01em;
+  color: color-mix(in srgb, var(--muted) 55%, var(--ink));
+}
+
+/* Wider gutters: a one-cell overshoot in a 12-wide grid is the drill's
+   most common non-colour error. The chips stay 1fr wide so the grid can
+   never overflow its column count on a narrow sheet. */
+.chips { gap: 8px; }
