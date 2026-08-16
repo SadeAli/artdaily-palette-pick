@@ -44,7 +44,19 @@
     };
   }
 
-  /* sRGB 0–255 → linear → XYZ (D65) → CIE Lab */
+  /* sRGB 0–255 → linear → XYZ (D65) → CIE Lab.
+     lin() deliberately folds a junk CHANNEL to 0 rather than letting it
+     propagate, but a missing colour OBJECT threw on `rgb.r` before it
+     ever got there — so scoreScene, which maps every colour through
+     here first, threw outright on a null entry instead of returning a
+     number. The scoring layer's standing contract is that degenerate
+     input comes back as a finite 0–100, never a throw. Fold a missing
+     object to exactly where a missing channel already goes.
+     (This is the no-throw floor, not a "no pick" semantic: a null reads
+     as black. Genuinely ABSENT picks — a short pickRgbs array — still
+     land on matchPicks' NO_PICK_DE branch and score 0, unchanged.
+     Unreachable from onLock either way, which checks all three slots
+     are filled before it scores anything.) */
   function rgbToLab(rgb) {
     function lin(c) {
       c = Number(c);
@@ -52,6 +64,7 @@
       c = (c < 0 ? 0 : c > 255 ? 255 : c) / 255;
       return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
     }
+    if (!rgb) rgb = {};
     var r = lin(rgb.r), g = lin(rgb.g), b = lin(rgb.b);
     var X = (0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047;
     var Y = 0.2126729 * r + 0.7151522 * g + 0.0721750 * b;
