@@ -472,10 +472,25 @@ a { color: inherit; }
    specificity as the media-query rules and comes after them, so it won
    at every width and silently widened the gutters the breakpoints below
    were sized around. */
+/* THE ROW GUTTER IS WIDER THAN THE COLUMN GUTTER ON EVERY REFLOWED
+   LAYOUT, and that is a scoring-fairness measure, not a decoration.
+   The sheet is built as 4 tone rows × 12 hue columns (HUE_COLS), so at
+   the full 12 columns the chip to the RIGHT is one hue step and the chip
+   BELOW is one tone step — measured at 1.00 and 1.17 cells, i.e. 50 and
+   42 out of 100 for that role against ZERO_CELLS = 2. Below 704px the
+   grid reflows and the chip below is no longer the next tone, it is
+   `cols` HUE steps away: measured 2.74 cells at 8 columns and 3.12 at 6,
+   both a flat 0. So the same one-chip aiming slip costs 42 on a laptop
+   and everything on a phone, purely because the sheet rewrapped.
+   The price is fixed by the colour maths and must stay that way; what
+   can be changed is how easy the expensive slip is to make. Column gaps
+   are left EXACTLY as the breakpoint maths below assumes (they set the
+   44px chip edge), and only the rows are opened up. */
 .chips {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
-  gap: 8px;
+  column-gap: 8px;
+  row-gap: 8px;   /* 12 columns: down IS the next tone, nothing to guard */
 }
 .chip {
   width: 100%;
@@ -515,16 +530,16 @@ a { color: inherit; }
       5 cols, gap 6 → needs C ≥ 244 → V ≥ 300
       4 cols, gap 6 → needs C ≥ 194 → V ≥ 250  */
 @media (max-width: 703px) {
-  .chips { grid-template-columns: repeat(8, 1fr); }
+  .chips { grid-template-columns: repeat(8, 1fr); column-gap: 8px; row-gap: 16px; }
 }
 @media (max-width: 495px) {
-  .chips { grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .chips { grid-template-columns: repeat(6, 1fr); column-gap: 6px; row-gap: 14px; }
 }
 @media (max-width: 359px) {
-  .chips { grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  .chips { grid-template-columns: repeat(5, 1fr); column-gap: 6px; row-gap: 14px; }
 }
 @media (max-width: 307px) {
-  .chips { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .chips { grid-template-columns: repeat(4, 1fr); column-gap: 6px; row-gap: 14px; }
 }
 
 /* narrow screens: pin the scene while the chip grid scrolls beneath it */
