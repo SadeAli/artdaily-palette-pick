@@ -142,6 +142,48 @@
     return 'well off';
   }
 
+  /* A PLAIN NAME FOR A CHIP. A raw hex is true but says nothing a person
+     can picture, and it was the WHOLE of a chip's accessible name — 48 of
+     them, every one reading "chip #7f9fc4". Name the hue and the tone
+     instead (the way mix-to-target names its base pigments) and keep the
+     hex behind it for anyone who wants the exact value.
+     How light and how colourful come from Lab, which is the perceptual
+     read; only the hue NAME comes off the sRGB wheel, because that is the
+     wheel people name colours on. Naming from the Lab hue angle instead
+     puts pure red at 40°, i.e. calls it "orange".
+     Pure: an {r,g,b} in, a string out, no DOM — and NaN-safe, because a
+     broken channel must degrade to a wrong-but-speakable name rather than
+     put "NaN" into a label. */
+  var HUE_STOPS = [
+    [15, 'red'], [45, 'orange'], [70, 'yellow'], [95, 'yellow-green'],
+    [150, 'green'], [200, 'teal'], [255, 'blue'], [290, 'violet'],
+    [335, 'magenta'], [360, 'red'],
+  ];
+  function colourName(rgb) {
+    function ch(v) { v = Number(v); return isFinite(v) ? (v < 0 ? 0 : v > 255 ? 255 : v) : 0; }
+    if (!rgb) rgb = {};
+    var r = ch(rgb.r), g = ch(rgb.g), b = ch(rgb.b);
+    var lab = rgbToLab({ r: r, g: g, b: b });
+    var C = Math.sqrt(lab.a * lab.a + lab.b * lab.b);
+    if (!isFinite(C)) C = 0;
+    var L = isFinite(lab.L) ? lab.L : 50;
+    var tone = L >= 66 ? 'light ' : (L <= 42 ? 'dark ' : '');
+    if (C < 6) return tone ? tone + 'grey' : 'mid grey';
+    var mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn, h = 0;
+    if (d > 0) {
+      if (mx === r) h = ((g - b) / d) % 6;
+      else if (mx === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h *= 60;
+    }
+    h = ((h % 360) + 360) % 360;
+    var name = 'red', i;
+    for (i = 0; i < HUE_STOPS.length; i++) {
+      if (h < HUE_STOPS[i][0]) { name = HUE_STOPS[i][1]; break; }
+    }
+    return tone + (C < 20 ? 'muted ' : '') + name;
+  }
+
   var SAMEY_DE = 14; /* below this the three picks are one colour, not a palette */
 
   /* Assign the 3 picks to [dominant, secondary, accent] by brute-forcing
@@ -593,8 +635,12 @@
       b.style.background = rgbCss(scene.chips[i].rgb);
       b.setAttribute('aria-pressed', 'false');
       /* "tap" is wrong for the half of the room on a keyboard, and the
-         pressed state already says whether it is picked */
-      b.setAttribute('aria-label', 'chip ' + rgbHex(scene.chips[i].rgb));
+         pressed state already says whether it is picked. The ordinal is
+         the only orientation there is inside a 48-cell sheet that
+         rewraps from 12 columns down to 4, and the colour name is the
+         part a person can actually picture. */
+      b.setAttribute('aria-label', 'chip ' + (i + 1) + ' of ' + scene.chips.length +
+        ', ' + colourName(scene.chips[i].rgb) + ', ' + rgbHex(scene.chips[i].rgb));
       b.dataset.idx = String(i);
       b.addEventListener('click', onChip);
       chipsEl.appendChild(b);
@@ -611,7 +657,8 @@
         filled++;
         el.classList.add('filled');
         el.style.background = rgbCss(p.rgb);
-        el.setAttribute('aria-label', 'pick ' + (i + 1) + ', ' + SLOT_NAMES[i] + ': ' + rgbHex(p.rgb) + ' — press to clear');
+        el.setAttribute('aria-label', 'pick ' + (i + 1) + ', ' + SLOT_NAMES[i] + ': ' +
+          colourName(p.rgb) + ', ' + rgbHex(p.rgb) + ' — press to clear');
       } else {
         el.classList.remove('filled');
         el.style.background = '';
@@ -745,6 +792,22 @@
     }
   }
 
+  /* Every arrow in this family's markup is wrapped in an aria-hidden
+     span, because it is decoration — but the primary button relabels
+     itself from JS with textContent, which dropped the glyph straight
+     into the accessible name: "next scene right arrow". Rebuild the
+     label the way the markup does it. */
+  function setBtnLabel(btn, text, glyph) {
+    btn.innerHTML = '';
+    btn.appendChild(document.createTextNode(glyph ? text + ' ' : text));
+    if (glyph) {
+      var g = document.createElement('span');
+      g.setAttribute('aria-hidden', 'true');
+      g.textContent = glyph;
+      btn.appendChild(g);
+    }
+  }
+
   /* ---- flow ---- */
   function startScene() {
     scene = makeScene(sceneIdx);
@@ -754,7 +817,7 @@
     chipsEl.hidden = false;
     renderChips();
     syncPicker();
-    btnLock.textContent = 'lock it in';
+    setBtnLabel(btnLock, 'lock it in');
     hint.textContent = baseHint();
     draw();
   }
@@ -803,7 +866,8 @@
       hint.textContent = matchWord(res.matches[0].dE, scene.cellStep) + ' on the biggest area · ' +
         matchWord(res.matches[1].dE, scene.cellStep) + ' on the second · ' +
         matchWord(res.matches[2].dE, scene.cellStep) + ' on the small loud one.';
-      btnLock.textContent = (sceneIdx < SCENES_PER_ROUND - 1) ? 'next scene →' : 'finish round';
+      if (sceneIdx < SCENES_PER_ROUND - 1) setBtnLabel(btnLock, 'next scene', '→');
+      else setBtnLabel(btnLock, 'finish round');
       btnLock.disabled = false;
       return;
     }
@@ -823,7 +887,7 @@
     hudScore.textContent = String(res.score);
     hudBest.textContent = res.best === null ? '–' : String(res.best);
     hint.textContent = 'round done — press “new round” to go again.';
-    btnLock.textContent = 'round done';
+    setBtnLabel(btnLock, 'round done');
     btnLock.disabled = true;
     setRoundBtnLabel(false);
     showToast((res.isNewBest ? 'new best! ' : 'score ') + res.score + ' / 100', res.isNewBest);

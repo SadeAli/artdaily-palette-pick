@@ -493,6 +493,7 @@ a { color: inherit; }
   row-gap: 8px;   /* 12 columns: down IS the next tone, nothing to guard */
 }
 .chip {
+  position: relative;
   width: 100%;
   aspect-ratio: 1 / 1;
   padding: 0;
@@ -502,18 +503,41 @@ a { color: inherit; }
   transition: transform 0.12s ease;
 }
 .chip:hover { transform: translateY(-2px); }
-/* picked chips stay tappable — a retap unpicks them */
-.chip[aria-pressed="true"] { opacity: 0.3; transform: none; }
+/* PICKED CHIPS STAY TAPPABLE — a retap unpicks them — which means they
+   also stay FOCUSABLE, and the fade that marks them used to be
+   `opacity: 0.3` on the button itself. `opacity` composites the whole
+   element as one group, its outline included, so the shared
+   :focus-visible ring faded with the chip: --focus at 0.3 over the
+   sheet measures 1.45:1 in the light theme and 1.74:1 in the night
+   studio, against the 3:1 a focus indicator has to clear (full
+   strength it is 3.92 / 6.56). A keyboard player tabbing back to
+   un-pick a chip could not see where they were standing — on precisely
+   the chips they had a reason to return to.
+   Draw the fade as an OVERLAY instead. The fill dims by the same
+   amount over the same sheet colour, and the border and the focus ring
+   keep full strength because neither is inside the faded box. */
+.chip[aria-pressed="true"] { transform: none; }
+.chip[aria-pressed="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--card); /* the sheet behind the grid — .term's background */
+  opacity: 0.7;
+  pointer-events: none;
+}
 .chip:disabled { cursor: default; transform: none; }
 
-/* reveal: the three true chips get an ink ring in the still-visible grid */
+/* reveal: the three true chips get an ink ring in the still-visible grid.
+   (No focus clash here: every chip is disabled for the reveal, so none
+   of them can hold focus while this outline is on.) */
 .chip.rv-true {
   outline: 3px solid var(--ink);
   outline-offset: 2px;
-  position: relative;
   z-index: 1;
 }
-.chip.rv-true[aria-pressed="true"] { opacity: 1; } /* a correct pick shows full strength */
+/* a correct pick shows full strength */
+.chip.rv-true[aria-pressed="true"]::after { display: none; }
 
 /* Fewer columns as the sheet narrows, so every chip stays ≥ 44px — the
    touch-target floor, and the whole reason a finger can play this at all.
